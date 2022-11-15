@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using CsvHelper.Configuration;
+using CsvHelper.Configuration.Attributes;
 using Nest;
 using System;
 
@@ -21,21 +23,24 @@ namespace InformationRetrieval
         /// <summary>
         /// The unique id
         /// </summary>
-        public Guid Id { get; set; }
+        public Guid Id { get; }
 
         /// <summary>
         /// The rating
         /// </summary>
+        [Name("rating")]
         public double Rating { get; set; }
 
         /// <summary>
         /// The user's id
         /// </summary>
+        [Name("uid")]
         public int UserId { get; set; }
 
         /// <summary>
         /// The book's id
         /// </summary>
+        [Name("isbn")]
         public string BookId { get; set; }
 
         #endregion
@@ -45,10 +50,9 @@ namespace InformationRetrieval
         /// <summary>
         /// Default Constructor 
         /// </summary>
-
         public BookRating()
         {
-
+            Id = Guid.NewGuid();
         }
 
         #endregion
