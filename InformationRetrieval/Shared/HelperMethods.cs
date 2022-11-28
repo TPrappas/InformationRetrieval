@@ -23,7 +23,7 @@ namespace InformationRetrieval
             where T : class
         {
             var text = File.ReadAllText(filePath);
-            text = text.Replace("['", "\"").Replace("']", "\"");
+            text = text.Replace("\"['", "\"").Replace("']\"", "\"").Replace("['", "\"").Replace("']", "\"");
             File.WriteAllText(filePath, text);
 
             var streamReader = new StreamReader(filePath);
@@ -31,8 +31,6 @@ namespace InformationRetrieval
             var csvReader = new CsvReader(streamReader, CultureInfo.InvariantCulture);
 
             var data = csvReader.GetRecords<T>().ToList();
-
-            Console.WriteLine("Test 1 completed successfully");
 
             csvReader.Dispose();
             streamReader.Dispose();

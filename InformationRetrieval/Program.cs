@@ -12,15 +12,15 @@ namespace InformationRetrieval
     {
         public static void Main(string[] args)
         {
-            var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath);
+            var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath).ToList();
             var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
-            // books
-            var Books = new List<Book>();
 
-            // foreach book
-            // select all rating where book id = book.Id
-            // book.ratings = select
+            books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id));
+
             
+
+
+            Console.ReadLine();
         }
     }
 }
