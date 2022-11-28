@@ -13,12 +13,12 @@ namespace InformationRetrieval
         /// <summary>
         /// The books' CSV file path
         /// </summary>
-        public const string BooksFilePath = @"C:/CEID_projects/Retrieval/test.csv";
+        public const string BooksFilePath = @"C:/CEID_projects/Retrieval/BX-Books.csv";
         
         /// <summary>
         /// The book ratings' CSV file path
         /// </summary>
-        public const string BookRatingsFilePath = @"C:/CEID_projects/Retrieval/test2.csv";
+        public const string BookRatingsFilePath = @"C:/CEID_projects/Retrieval/BX-Book-Ratings.csv";
 
         /// <summary>
         /// The users' CSV file path
