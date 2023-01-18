@@ -36,42 +36,68 @@ namespace InformationRetrieval
 
     public class Program
     {
+        #region Public Methods
+
         public static void Main(string[] args)
         {
-            //// Imports the books from the Book-CSV
-            //var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath).ToList();
+            var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
 
-            //// Imports the book ratings from the Book-Rating-CSV
-            //var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
+            var settings = new ConnectionSettings(pool);
 
-            //// Matches the book ratings to the book
-            //books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id));
+            var client = new ElasticClient(settings);
 
-            //TestEight();
-
-            TestHelpers();
+            AddDataToElasticSearch(client);
 
             // For debugging reasons
             Console.ReadLine();
+        }
+
+        /// <summary>
+        /// Adds to the elastic search the book and user data from the CSV files
+        /// </summary>
+        public static async void AddDataToElasticSearch(ElasticClient client)
+        {
+            // Imports the books from the Book-CSV
+            var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath).ToList();
+
+            // Imports the book ratings from the Book-Rating-CSV
+            var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
+
+            // Matches the book ratings to the book
+            books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id));
+            
+            // Bulk inserts the books
+            var booksBulkInsert = await HelperMethods.BulkData(client, "books", books);
+
+            // Bulk inserts the book ratings
+            var bookRatingsBulkInsert = await HelperMethods.BulkData(client, "ratings", ratings);
+
+            // Imports the books from the Book-CSV
+            var users = HelperMethods.ImportFromCSV<User>(UsersFilePath).ToList();
+
+            // Bulk inserts the users
+            var usersBulkInsert = await HelperMethods.BulkData(client, "users", books);
         }
 
         public static async void TestHelpers()
         {
             var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
 
-            var settings = new ConnectionSettings(pool)
+            var settings = new ConnectionSettings(pool);
                 // configure the client with authentication credentials
-                .BasicAuthentication("username", "12345678");
-
+                //.BasicAuthentication("username", "12345678");
 
             var client = new ElasticClient(settings);
 
+            //var booksIndexResult = await HelperMethods.CreateIndex<Book>("books", client);
+            //var usersIndexResult = await HelperMethods.CreateIndex<User>("user", client);
+
             var person = new Person()
             {
-                Id= 0,
+                Id = 0,
                 FirstName = "Blue",
                 LastName = "Magenta",
-                IpAddress= "127.0.0.1",
+                IpAddress = "127.0.0.1",
             };
 
             HelperMethods.IndexData(client, "people", person);
@@ -103,19 +129,19 @@ namespace InformationRetrieval
 
             var bulk = await HelperMethods.BulkData(client, "people", people);
 
-            HelperMethods.UpdateData(client, "people", people.First(x => x.Id == 1).Id, new Person() 
+            HelperMethods.UpdateData(client, "people", people.First(x => x.Id == 1).Id, new Person()
             {
                 FirstName = "Orange",
                 Id = 1
             });
 
-            var search = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
+            //var search = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
 
-            var get = await HelperMethods.GetData<Person>(client, "people", 4);
+            //var get = await HelperMethods.GetData<Person>(client, "people", 4);
 
-            HelperMethods.DeleteData<Person, int>(client, "people", x => x.Id, 3);
+            //HelperMethods.DeleteData<Person, int>(client, "people", x => x.Id, 3);
 
-            var searchAll = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
+            //var searchAll = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
 
         }
 
@@ -123,12 +149,13 @@ namespace InformationRetrieval
         {
             var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
 
-            var settings = new ConnectionSettings(pool)
+            var settings = new ConnectionSettings(pool);
                 // configure the client with authentication credentials
-                .BasicAuthentication("username", "12345678");
+                //.BasicAuthentication("username", "12345678");
 
 
             var client = new ElasticClient(settings);
+            var tweetsIndexResult = await HelperMethods.CreateIndex<User>("tweets", client);
 
             var tweet = new Tweet
             {
@@ -138,18 +165,18 @@ namespace InformationRetrieval
                 Message = "Trying out the client, so far so good?"
             };
 
-            var response = await client.IndexAsync(tweet, request => request.Index("my-tweet-index"));
+            var response = await client.IndexAsync(tweet, request => request.Index("tweets"));
 
             if (response.IsValid)
             {
                 Console.WriteLine($"Index document with ID {response.Id} succeeded.");
             }
 
-            var responseT = await client.GetAsync<Tweet>(1, idx => idx.Index("my-tweet-index"));
+            var responseT = await client.GetAsync<Tweet>(1, idx => idx.Index("tweets"));
             var tweetT = responseT.Source;
 
             var getResponse = await client.SearchAsync<Tweet>(s => s
-                .Index("my-tweet-index")
+                .Index("tweets")
                 .From(0)
                 .Size(10)
                 //.Query(q => q
@@ -163,7 +190,7 @@ namespace InformationRetrieval
             }
 
             var updateResponse = await client.UpdateAsync<Tweet>(tweet.Id, u => u
-               .Index("my-tweet-index")
+               .Index("tweets")
                .Doc(new Tweet { Message = "Updated title!" }));
 
             if (updateResponse.IsValid)
@@ -171,7 +198,7 @@ namespace InformationRetrieval
                 Console.WriteLine("Update document succeeded.");
             }
 
-            var deleteResponse = await client.DeleteByQueryAsync<Tweet>(x => x.Index("my-tweet-index").Query(y => y.Term(z => z.Id, 1)));
+            var deleteResponse = await client.DeleteByQueryAsync<Tweet>(x => x.Index("tweets").Query(y => y.Term(z => z.Id, 1)));
 
 
             if (deleteResponse.IsValid)
@@ -211,7 +238,7 @@ namespace InformationRetrieval
                 },
             };
 
-            var bulkInsertResponse = await client.BulkAsync(x => x.Index("my-tweet-index").CreateMany<Tweet>(tweets));
+            var bulkInsertResponse = await client.BulkAsync(x => x.Index("tweets").CreateMany<Tweet>(tweets));
 
             if(bulkInsertResponse.IsValid)
             {
@@ -219,5 +246,8 @@ namespace InformationRetrieval
             }
 
         }
+        
+        #endregion
+
     }
 }

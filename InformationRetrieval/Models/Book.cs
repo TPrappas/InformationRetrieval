@@ -1,5 +1,5 @@
-﻿using CsvHelper.Configuration;
-using CsvHelper.Configuration.Attributes;
+﻿using CsvHelper.Configuration.Attributes;
+
 using Nest;
 
 #nullable disable

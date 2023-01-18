@@ -1,29 +1,25 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace InformationRetrieval
+﻿namespace InformationRetrieval
 {
     public static class Constants
     {
         #region File path
 
+        public const string FolderPath = @"D:/CEID/Ανάκτηση";
+
         /// <summary>
         /// The books' CSV file path
         /// </summary>
-        public const string BooksFilePath = @"C:/CEID_projects/Retrieval/BX-Books.csv";
+        public const string BooksFilePath = $@"{FolderPath}/BX-Books.csv";
         
         /// <summary>
         /// The book ratings' CSV file path
         /// </summary>
-        public const string BookRatingsFilePath = @"C:/CEID_projects/Retrieval/BX-Book-Ratings.csv";
+        public const string BookRatingsFilePath = $@"{FolderPath}/BX-Book-Ratings.csv";
 
         /// <summary>
         /// The users' CSV file path
         /// </summary>
-        public const string UsersFilePath = @"C:/CEID_projects/Retrieval/test3.csv";
+        public const string UsersFilePath = $@"{FolderPath}/BX-Users.csv";
 
         #endregion
     }
