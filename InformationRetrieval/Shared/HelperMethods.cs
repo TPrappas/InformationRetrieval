@@ -1,16 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using CsvHelper;
+
 using Nest;
-using CsvHelper;
-using static System.Net.Mime.MediaTypeNames;
+
 using System.Globalization;
-using CsvHelper.Configuration;
-using Elastic.Clients.Elasticsearch;
 using System.Linq.Expressions;
-using System.Collections;
 
 namespace InformationRetrieval
 {
@@ -39,6 +32,38 @@ namespace InformationRetrieval
             streamReader.Dispose();
 
             return data;
+        }
+
+        /// <summary>
+        /// Creates a new index in the given <paramref name="client"/> with name the given <paramref name="name"/>
+        /// </summary>
+        /// <typeparam name="T">The type of the items in the index</typeparam>
+        /// <param name="name">The name</param>
+        /// <param name="client">The client</param>
+        /// <returns></returns>
+        public static async Task<bool> CreateIndex<T>(string name, ElasticClient client)
+            where T : class
+        {
+            var indexSettings = new IndexSettings()
+            {
+                NumberOfReplicas = 1,
+                NumberOfShards = 1,
+            };
+
+            var response = await client.Indices.CreateAsync(
+                name,
+                index => index.InitializeUsing(new IndexState()
+                {
+                    Settings = indexSettings
+                }).Map<T>(p => p.AutoMap())
+            );
+
+            if (!response.IsValid)
+                Console.WriteLine($"Unsuccessful creation of index '{name}'!");
+            else
+                Console.WriteLine($"Successful creation of index '{name}'!");
+
+            return response.IsValid;
         }
 
         /// <summary>
@@ -193,17 +218,7 @@ namespace InformationRetrieval
         public static async Task<IEnumerable<BulkResponseItemBase>> BulkData<T>(ElasticClient client, string indexName, IEnumerable<T> data)
             where T : class
         {
-            var response = await client.BulkAsync(x => x.Index(indexName).CreateMany<T>(data));
-
-            //// If the response is not valid...
-            //if (!response.IsValid)
-            //{
-            //    // Show the error
-
-
-            //    // Return
-            //    return null;
-            //}
+            var response = await client.BulkAsync(x => x.Index(indexName).IndexMany<T>(data));
 
             return response.Items;
         }
