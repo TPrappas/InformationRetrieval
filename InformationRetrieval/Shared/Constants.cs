@@ -4,7 +4,7 @@
     {
         #region File path
 
-        public const string FolderPath = @"D:/CEID/Ανάκτηση";
+        public const string FolderPath = @"C:\CEID_projects\Retrieval";
 
         /// <summary>
         /// The books' CSV file path

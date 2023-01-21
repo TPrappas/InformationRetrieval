@@ -7,6 +7,7 @@ using static InformationRetrieval.Constants;
 using Nest;
 using Elasticsearch.Net;
 using Elastic.Clients.Elasticsearch;
+using System.Diagnostics;
 
 namespace InformationRetrieval
 {
@@ -42,11 +43,11 @@ namespace InformationRetrieval
         {
             var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
 
-            var settings = new ConnectionSettings(pool);
+            var settings = new ConnectionSettings(pool); 
 
             var client = new ElasticClient(settings);
 
-            AddDataToElasticSearch(client);
+            SearchBooks(client, 1, "Lord");
 
             // For debugging reasons
             Console.ReadLine();
@@ -57,26 +58,66 @@ namespace InformationRetrieval
         /// </summary>
         public static async void AddDataToElasticSearch(ElasticClient client)
         {
-            // Imports the books from the Book-CSV
+            // Creates the books index
+            var booksIndexResult = await HelperMethods.CreateIndexAsync<Book>("books", client);
+
+            // Creates the ratings index (they don't insert but we don't need them)
+            var ratingsIndexResult = await HelperMethods.CreateIndexAsync<BookRating>("ratings", client);
+
+            // Imports the books from the BX-Book-CSV
             var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath).ToList();
 
-            // Imports the book ratings from the Book-Rating-CSV
+            // Imports the book ratings from the BX-Book-Rating-CSV
             var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
 
             // Matches the book ratings to the book
-            books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id));
-            
-            // Bulk inserts the books
-            var booksBulkInsert = await HelperMethods.BulkData(client, "books", books);
+            books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id)); ;
 
-            // Bulk inserts the book ratings
-            var bookRatingsBulkInsert = await HelperMethods.BulkData(client, "ratings", ratings);
+            // TODO make the tasks faster
+            #region Bulk Books 
 
-            // Imports the books from the Book-CSV
+            var Stage1 = Task.Run(() =>
+            {
+                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(0, 50000));
+            });
+
+            var Stage2 = Task.Run(() =>
+            {
+                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(50000, 50000));
+            });
+            var Stage3 = Task.Run(() =>
+            {
+                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(100000, 34692));
+            });
+
+            Task.WaitAll(Stage1, Stage2, Stage3);
+
+            #endregion
+
+            // Bulk insert the ratings (they don't insert but we don't need them)
+            var ratingsBulkInsert = await HelperMethods.BulkDataAsync(client, "ratings", ratings.ToList());
+
+            #region Bulk Users
+
+            // Creates the users index
+            var usersIndexResult = await HelperMethods.CreateIndexAsync<User>("users", client);
+
+            // Imports the books from the BX-Users-CSV
             var users = HelperMethods.ImportFromCSV<User>(UsersFilePath).ToList();
 
             // Bulk inserts the users
-            var usersBulkInsert = await HelperMethods.BulkData(client, "users", books);
+            var usersBulkInsert = HelperMethods.BulkDataAsync(client, "users", users);
+
+            #endregion
+
+            Console.WriteLine();
+        }
+
+        public static async void SearchBooks(ElasticClient client, int userId, string term)
+        { 
+            var result = await HelperMethods.SearchDataAsync<Book, string>(client, "books", 0, 1000, x => x.Title, term);
+
+            var items = result;
         }
 
         public static async void TestHelpers()
@@ -127,7 +168,7 @@ namespace InformationRetrieval
                 }
             };
 
-            var bulk = await HelperMethods.BulkData(client, "people", people);
+            var bulk = await HelperMethods.BulkDataAsync(client, "people", people);
 
             HelperMethods.UpdateData(client, "people", people.First(x => x.Id == 1).Id, new Person()
             {
@@ -155,7 +196,7 @@ namespace InformationRetrieval
 
 
             var client = new ElasticClient(settings);
-            var tweetsIndexResult = await HelperMethods.CreateIndex<User>("tweets", client);
+            var tweetsIndexResult = await HelperMethods.CreateIndexAsync<User>("tweets", client);
 
             var tweet = new Tweet
             {

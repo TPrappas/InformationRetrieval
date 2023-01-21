@@ -17,7 +17,7 @@ namespace InformationRetrieval
         /// <summary>
         /// The unique id
         /// </summary>
-        public Guid Id { get; }
+        public string Id { get; }
 
         /// <summary>
         /// The rating
@@ -46,7 +46,7 @@ namespace InformationRetrieval
         /// </summary>
         public BookRating()
         {
-            Id = Guid.NewGuid();
+            Id = Guid.NewGuid().ToString();
         }
 
         #endregion

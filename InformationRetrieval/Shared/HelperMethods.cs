@@ -41,7 +41,7 @@ namespace InformationRetrieval
         /// <param name="name">The name</param>
         /// <param name="client">The client</param>
         /// <returns></returns>
-        public static async Task<bool> CreateIndex<T>(string name, ElasticClient client)
+        public static async Task<bool> CreateIndexAsync<T>(string name, ElasticClient client)
             where T : class
         {
             var indexSettings = new IndexSettings()
@@ -98,7 +98,7 @@ namespace InformationRetrieval
         /// <param name="client"></param>
         /// <param name="indexName"></param>
         /// <param name="id"></param>
-        public static async Task<T> GetData<T>(ElasticClient client, string indexName, int id)
+        public static async Task<T> GetDataAsync<T>(ElasticClient client, string indexName, int id)
             where T : class
         {
             var response = await client.GetAsync<T>(id, idx => idx.Index(indexName));
@@ -126,7 +126,7 @@ namespace InformationRetrieval
         /// <param name="from"></param>
         /// <param name="size"></param>
         /// <param name=""></param>
-        public static async Task<IEnumerable<T>> SearchData<T, TValue>(ElasticClient client, string indexName, int from, int size, Expression<Func<T, TValue>> term, TValue value)
+        public static async Task<IEnumerable<T>> SearchDataAsync<T, TValue>(ElasticClient client, string indexName, int from, int size, Expression<Func<T, TValue>> term, TValue value)
             where T : class
             where TValue : class
         {
@@ -134,8 +134,10 @@ namespace InformationRetrieval
                 .Index(indexName)
                 .From(from)
                 .Size(size)
-                .Query(q => q
-                    .Term(term, value)
+                .Query(q => 
+                    q.Match(m => 
+                        m.Field(term).Query(value.ToString())
+                    )
                 )
             );
 
@@ -215,12 +217,19 @@ namespace InformationRetrieval
         /// <param name="client"></param>
         /// <param name="indexName"></param>
         /// <param name="data"></param>
-        public static async Task<IEnumerable<BulkResponseItemBase>> BulkData<T>(ElasticClient client, string indexName, IEnumerable<T> data)
+        public static async Task<IEnumerable<BulkResponseItemBase>> BulkDataAsync<T>(ElasticClient client, string indexName, List<T> data)
             where T : class
         {
-            var response = await client.BulkAsync(x => x.Index(indexName).IndexMany<T>(data));
+            var startIndex = 0;
+            var items = new List<BulkResponseItemBase>();
+            while(startIndex <= data.Count() - 1 - 300)
+            {
+                var response = await client.BulkAsync(x => x.Index(indexName).CreateMany<T>(data.GetRange(startIndex, 300)));
+                items.AddRange(response.Items);
+                startIndex += 300;
+            }
 
-            return response.Items;
+            return items;
         }
     }
 }
