@@ -2,6 +2,8 @@
 
 using Nest;
 
+using System.Diagnostics.Metrics;
+
 #nullable disable
 
 namespace InformationRetrieval
@@ -12,6 +14,12 @@ namespace InformationRetrieval
     [ElasticsearchType(IdProperty = nameof(Id))]
     public class BookRating
     {
+        #region Private Members
+
+        private string mBookId;
+
+        #endregion
+
         #region Public Properties
 
         /// <summary>
@@ -35,7 +43,12 @@ namespace InformationRetrieval
         /// The book's id
         /// </summary>
         [Name("isbn")]
-        public string BookId { get; set; }
+        public string BookId
+        {
+            get => mBookId;
+
+            set => mBookId = value?.Trim();
+        }
 
         #endregion
 
@@ -47,6 +60,15 @@ namespace InformationRetrieval
         public BookRating()
         {
             Id = Guid.NewGuid().ToString();
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        public override string ToString()
+        {
+            return $"B:{BookId}   U:{UserId}   R:{Rating}";
         }
 
         #endregion

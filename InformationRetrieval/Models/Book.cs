@@ -12,18 +12,32 @@ namespace InformationRetrieval
     [ElasticsearchType(IdProperty = nameof(Id))]
     public class Book
     {
+        #region Private Members
+
+        /// <summary>
+        /// The member of the <see cref="Id"/>
+        /// </summary>
+        private string mId;
+
+        #endregion
+
         #region Public Properties
 
         /// <summary>
         /// The id
         /// </summary>
         [Name("isbn")]
-        public string Id { get; set; }
+        public string Id
+        {
+            get => mId;
+
+            set => mId = value?.Trim();
+        }
 
         /// <summary>
         /// The title
         /// </summary>
-        [Text(Similarity = "BM25")]
+        [Text(Similarity = "BM25", Fielddata = true)]
         [Name("book_title")]
         public string Title { get; set; }
 
@@ -81,6 +95,15 @@ namespace InformationRetrieval
         public Book()
         {
 
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        public override string ToString()
+        {
+            return Title + " " + Ratings.Count();   
         }
 
         #endregion

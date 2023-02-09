@@ -47,9 +47,8 @@ namespace InformationRetrieval
             var indexSettings = new IndexSettings()
             {
                 NumberOfReplicas = 1,
-                NumberOfShards = 1,
+                NumberOfShards = 1
             };
-
             var response = await client.Indices.CreateAsync(
                 name,
                 index => index.InitializeUsing(new IndexState()
@@ -58,8 +57,11 @@ namespace InformationRetrieval
                 }).Map<T>(p => p.AutoMap())
             );
 
+            var updateResponse = await client.Indices.UpdateSettingsAsync(name, s => s
+                .IndexSettings(i => i.Setting(UpdatableIndexSettings.MaxResultWindow, 1000000)));
+
             if (!response.IsValid)
-                Console.WriteLine($"Unsuccessful creation of index '{name}'!");
+                Console.WriteLine($"Unsuccessful creation of index '{name}'! The index probably already exists.");
             else
                 Console.WriteLine($"Successful creation of index '{name}'!");
 
@@ -98,7 +100,7 @@ namespace InformationRetrieval
         /// <param name="client"></param>
         /// <param name="indexName"></param>
         /// <param name="id"></param>
-        public static async Task<T> GetDataAsync<T>(ElasticClient client, string indexName, int id)
+        public static async Task<T?> GetDataAsync<T>(ElasticClient client, string indexName, int id)
             where T : class
         {
             var response = await client.GetAsync<T>(id, idx => idx.Index(indexName));
@@ -126,7 +128,7 @@ namespace InformationRetrieval
         /// <param name="from"></param>
         /// <param name="size"></param>
         /// <param name=""></param>
-        public static async Task<IEnumerable<T>> SearchDataAsync<T, TValue>(ElasticClient client, string indexName, int from, int size, Expression<Func<T, TValue>> term, TValue value)
+        public static async Task<IEnumerable<T>> SearchDataAsync<T, TValue>(ElasticClient client, string indexName, int from, int size, Expression<Func<T, TValue>>? term = null, TValue? value = null)
             where T : class
             where TValue : class
         {
@@ -134,9 +136,9 @@ namespace InformationRetrieval
                 .Index(indexName)
                 .From(from)
                 .Size(size)
-                .Query(q => 
-                    q.Match(m => 
-                        m.Field(term).Query(value.ToString())
+                .Query(q =>
+                    q.Match(m =>
+                        m.Field(term).Query(value?.ToString())
                     )
                 )
             );
@@ -146,12 +148,51 @@ namespace InformationRetrieval
             {
                 // Show the error
 
-
                 // Return
-                return null;
+                return Enumerable.Empty<T>();
             }
 
             return response.Documents;
+        }
+
+        /// <summary>
+        /// Search the data that contain similar words
+        /// </summary>
+        /// <typeparam name="TValue">The value</typeparam>
+        /// <param name="client">The client</param>
+        /// <param name="indexName">The index name</param>
+        /// <param name="from">Starting index</param>
+        /// <param name="size">The size</param>
+        /// <param name="term">The term</param>
+        /// <param name="userId">The user id</param>
+        /// <param name="value">The value</param>
+        public static async Task<IEnumerable<Book>> SearchUserBookRatingsAsync<TValue>(ElasticClient client, int userId, string indexName, int from, int size, Expression<Func<Book, TValue>> term, TValue value)
+            where TValue : class
+        {
+            var response = await client.SearchAsync<Book>(s => s
+                .Index(indexName)
+                .From(from)
+                .Size(size)
+                .Query(q =>
+                    q.Match(m =>
+                        m.Field(term).Query(value.ToString())) &&
+                    q.Term("ratings.userId", userId)
+                )
+            );
+            // If the response is not valid...
+            if (!response.IsValid)
+            {
+                // Show the error
+                Console.WriteLine(response.OriginalException.Message);
+                // Return
+                return Enumerable.Empty<Book>();
+            }
+
+            var books = response.Documents.OrderByDescending(x => x.Title).ToList();
+
+            var percentage = (int)Math.Ceiling(books.Count() * 0.1);
+
+            return books.GetRange(0, percentage);
         }
 
         /// <summary>
@@ -213,23 +254,30 @@ namespace InformationRetrieval
         /// <summary>
         /// Bulk insert the given data
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="client"></param>
-        /// <param name="indexName"></param>
-        /// <param name="data"></param>
+        /// <typeparam name="T">Τhe type</typeparam>
+        /// <param name="client">The client</param>
+        /// <param name="indexName">The index name</param>
+        /// <param name="data">The data</param>
         public static async Task<IEnumerable<BulkResponseItemBase>> BulkDataAsync<T>(ElasticClient client, string indexName, List<T> data)
             where T : class
         {
             var startIndex = 0;
-            var items = new List<BulkResponseItemBase>();
-            while(startIndex <= data.Count() - 1 - 300)
+            var tasks = new List<Task<BulkResponse>>();
+            
+            // While the start index is not the last...
+            while(startIndex <= data.Count - 1 - 300)
             {
-                var response = await client.BulkAsync(x => x.Index(indexName).CreateMany<T>(data.GetRange(startIndex, 300)));
-                items.AddRange(response.Items);
+                // Add to the task list a new bulk for the specidfied index for 300 records
+                tasks.Add(client.BulkAsync(x => x.Index(indexName).CreateMany<T>(data.GetRange(startIndex, 300))));
+                // Increament the index by 300
                 startIndex += 300;
             }
 
-            return items;
+            // Excecute the tasks
+            var results = await Task.WhenAll(tasks);
+
+            // Return the items
+            return results.SelectMany(x => x.Items);
         }
     }
 }

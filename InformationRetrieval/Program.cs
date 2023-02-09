@@ -8,35 +8,35 @@ using Nest;
 using Elasticsearch.Net;
 using Elastic.Clients.Elasticsearch;
 using System.Diagnostics;
+using Microsoft.ML;
+using Elastic.Clients.Elasticsearch.Core.GetScriptContext;
+using InformationRetrieval.Models;
 
 namespace InformationRetrieval
 {
-    public class Tweet
-    {
-        public int Id { get; set; }
-        public string User { get; set; }
-        public DateTime PostDate { get; set; }
-        public string Message { get; set; }
-    }
-
-    public class Person
-    {
-        public int Id { get; set; }
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
-        public string IpAddress { get; set; }
-    }
-    public class GeoIp
-    {
-        public string CityName { get; set; }
-        public string ContinentName { get; set; }
-        public string CountryIsoCode { get; set; }
-        public GeoLocation Location { get; set; }
-        public string RegionName { get; set; }
-    }
-
     public class Program
     {
+        #region Public Properties
+
+        /// <summary>
+        /// The total number of books in the CSV file
+        /// </summary>
+        public static int TotalBooksInFile { get; set; } = 0;
+
+        #endregion
+
+        #region Constructors
+
+        /// <summary>
+        /// Default constructor
+        /// </summary>
+        public Program() : base()
+        {
+
+        }
+
+        #endregion
+
         #region Public Methods
 
         public static void Main(string[] args)
@@ -46,8 +46,14 @@ namespace InformationRetrieval
             var settings = new ConnectionSettings(pool); 
 
             var client = new ElasticClient(settings);
+            
+            // Adds data to elastic search
+            AddDataToElasticSearch(client);
+            
+            // Searches the book titles that contain the specified string and that the user with the specified id has rated them
+            SearchBooks(client, 8067, "Of");
 
-            SearchBooks(client, 1, "Lord");
+            GetUserData();
 
             // For debugging reasons
             Console.ReadLine();
@@ -59,236 +65,171 @@ namespace InformationRetrieval
         public static async void AddDataToElasticSearch(ElasticClient client)
         {
             // Creates the books index
-            var booksIndexResult = await HelperMethods.CreateIndexAsync<Book>("books", client);
+            var booksIndexResult = await HelperMethods.CreateIndexAsync<Book>(BooksIndex, client);
 
             // Creates the ratings index (they don't insert but we don't need them)
-            var ratingsIndexResult = await HelperMethods.CreateIndexAsync<BookRating>("ratings", client);
+            var ratingsIndexResult = await HelperMethods.CreateIndexAsync<BookRating>(RatingsIndex, client);
 
-            // Imports the books from the BX-Book-CSV
+            // Creates the users index
+            var usersIndexResult = await HelperMethods.CreateIndexAsync<User>(UsersIndex, client);
+
             var books = HelperMethods.ImportFromCSV<Book>(BooksFilePath).ToList();
 
             // Imports the book ratings from the BX-Book-Rating-CSV
             var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
 
-            // Matches the book ratings to the book
-            books.ForEach(book => book.Ratings = ratings.Where(x => x.BookId == book.Id)); ;
+            // Imports the books from the BX-Users-CSV
+            var users = HelperMethods.ImportFromCSV<User>(UsersFilePath).ToList();
 
-            // TODO make the tasks faster
-            #region Bulk Books 
-
-            var Stage1 = Task.Run(() =>
+            books = books.GroupJoin(ratings, x => x.Id, x => x.BookId, (book, ratings) =>
             {
-                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(0, 50000));
-            });
+                book.Ratings = ratings.ToList();
 
-            var Stage2 = Task.Run(() =>
-            {
-                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(50000, 50000));
-            });
-            var Stage3 = Task.Run(() =>
-            {
-                var booksBulkInsert = HelperMethods.BulkDataAsync(client, "books", books.GetRange(100000, 34692));
-            });
+                return book;
+            }).ToList();
+            TotalBooksInFile = books.Count;
 
-            Task.WaitAll(Stage1, Stage2, Stage3);
-
-            #endregion
+            var results = await Task.WhenAll(
+                HelperMethods.BulkDataAsync(client, BooksIndex, books.GetRange(0, (int)Math.Floor((double)(books.Count / 3)) - 1)),
+                HelperMethods.BulkDataAsync(client, BooksIndex, books.GetRange((int)Math.Floor((double)(books.Count / 3)), (int)Math.Floor((double)(books.Count * 2 / 3)) - 1)),
+                HelperMethods.BulkDataAsync(client, BooksIndex, books.GetRange((int)Math.Floor((double)(books.Count * 2 / 3)), books.Count - 1))
+            );
 
             // Bulk insert the ratings (they don't insert but we don't need them)
-            var ratingsBulkInsert = await HelperMethods.BulkDataAsync(client, "ratings", ratings.ToList());
+            var ratingsBulkInsert = await HelperMethods.BulkDataAsync(client, RatingsIndex, ratings.ToList());
 
-            #region Bulk Users
+            // Bulk inserts the users
+            var usersBulkInsert = HelperMethods.BulkDataAsync(client, UsersIndex, users);
+        }
 
-            // Creates the users index
-            var usersIndexResult = await HelperMethods.CreateIndexAsync<User>("users", client);
+        /// <summary>
+        /// Searches the book titles that contain the specified string and that the user with the specified id has rated them
+        /// </summary>
+        /// <param name="client">The client</param>
+        /// <param name="userId">The user id</param>
+        /// <param name="searchTerm">The search term</param>
+        public static async void SearchBooks(ElasticClient client, int userId, string searchTerm)
+        { 
+            // The books
+            var result = await HelperMethods.SearchUserBookRatingsAsync(client, userId, BooksIndex, 0, 10000, x => x.Title, searchTerm);
+        }
+        
+        /// <summary>
+        /// Gets the user data and trains with K-means
+        /// </summary>
+        public static void GetUserData()
+        {
+            // Imports the book ratings from the BX-Book-Rating-CSV
+            var ratings = HelperMethods.ImportFromCSV<BookRating>(BookRatingsFilePath);
 
             // Imports the books from the BX-Users-CSV
             var users = HelperMethods.ImportFromCSV<User>(UsersFilePath).ToList();
 
-            // Bulk inserts the users
-            var usersBulkInsert = HelperMethods.BulkDataAsync(client, "users", users);
 
-            #endregion
+            // Declare a dictionary that will contain the user id and ratings per category
+            var userStats = new List<UserRatingPerGroup>();
 
-            Console.WriteLine();
+            var userRatings = users.GroupJoin(ratings, x => x.Id, y => y.UserId, (user, ratings) => 
+                new UserRatings(user, ratings.Where(x => x.UserId == user.Id && x.Rating > 0).ToList()))
+                .OrderBy(x => x.Id).ToList();
+
+            var usersByCountry = userRatings.GroupBy(x => x.Country).OrderBy(g => g.Key).ToList();
+
+            // For each group with users by country...
+            foreach (var group in usersByCountry)
+            {
+                var genZ = group.Where(x => x.Age >= 0 && x.Age < 27 && x.Ratings.Count() > 0).ToList();
+                var millenials = group.Where(x => x.Age >= 27 && x.Age < 43 && x.Ratings.Count() > 0).ToList();
+                var genX = group.Where(x => x.Age >= 43 && x.Age < 59 && x.Ratings.Count() > 0).ToList();
+                var boomers = group.Where(x => x.Age >= 59 && x.Ratings.Count() > 0).ToList();
+                var bots = group.Where(x => x.Age is null && x.Ratings.Count() > 0).ToList();
+
+                // Gets the ratings of the generation and calculates for each the average
+                var genZAverageRating = genZ.Select(x => x.Ratings.Average(r => r.Rating));
+                
+                // For each user creates and adds a new model that has the user id and the average rating of their generation
+                genZ.ForEach(x => userStats.Add(new UserRatingPerGroup() 
+                {
+                    RatingPerGroup = new AverageRatingPerGroup(new List<double>() { genZAverageRating.Average(x => x), 0, 0, 0, 0 }),
+                    Id = x.Id
+                }));
+                
+                // Gets the ratings of the generation and calculates for each the average
+                var millenialsAverageRating = millenials.Select(x => x.Ratings.Average(r => r.Rating));
+                
+                // For each user creates and adds a new model that has the user id and the average rating of their generation
+                millenials.ForEach(x => userStats.Add(new UserRatingPerGroup()
+                {
+                    RatingPerGroup = new AverageRatingPerGroup(new List<double>() { 0, millenialsAverageRating.Average(x => x), 0, 0, 0 }),
+                    Id = x.Id
+                }));
+
+                // Gets the ratings of the generation and calculates for each the average
+                var genXAverageRating = genX.Select(x => x.Ratings.Average(r => r.Rating));
+                
+                // For each user creates and adds a new model that has the user id and the average rating of their generation
+                genX.ForEach(x => userStats.Add(new UserRatingPerGroup()
+                {
+                    RatingPerGroup = new AverageRatingPerGroup(new List<double>() { 0, 0, genXAverageRating.Average(x => x), 0, 0 }),
+                    Id = x.Id
+                }));
+
+                // Gets the ratings of the generation and calculates for each the average
+                var boomersAverageRating = boomers.Select(x => x.Ratings.Average(r => r.Rating));
+                
+                // For each user creates and adds a new model that has the user id and the average rating of their generation
+                boomers.ForEach(x => userStats.Add(new UserRatingPerGroup()
+                {
+                    RatingPerGroup = new AverageRatingPerGroup(new List<double>() { 0, 0, 0, boomersAverageRating.Average(x => x), 0 }),
+                    Id = x.Id
+                }));
+
+                // Gets the ratings of the generation and calculates for each the average
+                var botsAverageRating = bots.Select(x => x.Ratings.Average(r => r.Rating));
+
+                // For each user creates and adds a new model that has the user id and the average rating of their generation
+                bots.ForEach(x => userStats.Add(new UserRatingPerGroup()
+                {
+                    RatingPerGroup = new AverageRatingPerGroup(new List<double>() { 0, 0, 0, 0, botsAverageRating.Average(x => x)}),
+                    Id = x.Id
+                }));
+            }
+
+            // Declare the features column names
+            var featureColumnName = "Features";
+
+            //Initialize a new machine learning context object and set the seed
+            var machineLearningContext = new MLContext(0);
+
+            // Initialize the number of clusters
+            var numberOfClusters = 4;
+
+            // Get the training data
+            var averageRatingsTrainingData = machineLearningContext.Data.LoadFromEnumerable(userStats.Select(x => x.RatingPerGroup).ToList());
+
+            // Get the column names
+            var propertyNames = typeof(AverageRatingPerGroup).GetProperties().Select(x => x.Name).ToArray();
+
+            // Initialize the k-means trainer
+            var kMeansTrainer = machineLearningContext.Transforms.Concatenate(featureColumnName, propertyNames)
+                .Append(machineLearningContext.Clustering.Trainers.KMeans(featureColumnName, numberOfClusters: numberOfClusters));
+
+            // Train the model
+            var trainedAverageRatingsModel = kMeansTrainer.Fit(averageRatingsTrainingData);
+
+            // Run the model on the same data set
+            var transformedAverageRatingsData = trainedAverageRatingsModel.Transform(averageRatingsTrainingData);
+
+            // Get the predictions
+            var predictions = machineLearningContext.Data.CreateEnumerable<AverageRatingPerGroupPrediction>(transformedAverageRatingsData, false).ToList();
+
+            // Declare a dictionary for the cluster and the average ratings per category
+            var clusteredUsersPerCluster = new List<List<int>>();
+
+            // Declare a dictionary for the cluster and the average ratings per movie
+            var averageMovieRatingPerCluster = new Dictionary<uint, List<double>>();
         }
 
-        public static async void SearchBooks(ElasticClient client, int userId, string term)
-        { 
-            var result = await HelperMethods.SearchDataAsync<Book, string>(client, "books", 0, 1000, x => x.Title, term);
-
-            var items = result;
-        }
-
-        public static async void TestHelpers()
-        {
-            var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
-
-            var settings = new ConnectionSettings(pool);
-                // configure the client with authentication credentials
-                //.BasicAuthentication("username", "12345678");
-
-            var client = new ElasticClient(settings);
-
-            //var booksIndexResult = await HelperMethods.CreateIndex<Book>("books", client);
-            //var usersIndexResult = await HelperMethods.CreateIndex<User>("user", client);
-
-            var person = new Person()
-            {
-                Id = 0,
-                FirstName = "Blue",
-                LastName = "Magenta",
-                IpAddress = "127.0.0.1",
-            };
-
-            HelperMethods.IndexData(client, "people", person);
-
-            var people = new List<Person>()
-            {
-                new Person()
-                {
-                    Id = 5,
-                    FirstName = "AAAAAA",
-                    LastName = "Papa",
-                    IpAddress= "127.0.0.1",
-                },
-                new Person()
-                {
-                    Id = 1,
-                    FirstName = "Triantafyllos",
-                    LastName = "Prappas",
-                    IpAddress= "127.0.0.1",
-                },
-                new Person()
-                {
-                    Id = 6,
-                    FirstName = "BBBBB",
-                    LastName = "Papa",
-                    IpAddress= "127.0.0.1",
-                }
-            };
-
-            var bulk = await HelperMethods.BulkDataAsync(client, "people", people);
-
-            HelperMethods.UpdateData(client, "people", people.First(x => x.Id == 1).Id, new Person()
-            {
-                FirstName = "Orange",
-                Id = 1
-            });
-
-            //var search = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
-
-            //var get = await HelperMethods.GetData<Person>(client, "people", 4);
-
-            //HelperMethods.DeleteData<Person, int>(client, "people", x => x.Id, 3);
-
-            //var searchAll = await HelperMethods.SearchData<Person, string>(client, "people", 0, 10, x => x.IpAddress, "127.0.0.1");
-
-        }
-
-        public static async void  TestEight()
-        {
-            var pool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
-
-            var settings = new ConnectionSettings(pool);
-                // configure the client with authentication credentials
-                //.BasicAuthentication("username", "12345678");
-
-
-            var client = new ElasticClient(settings);
-            var tweetsIndexResult = await HelperMethods.CreateIndexAsync<User>("tweets", client);
-
-            var tweet = new Tweet
-            {
-                Id = 1,
-                User = "stevejgordon",
-                PostDate = new DateTime(2009, 11, 15),
-                Message = "Trying out the client, so far so good?"
-            };
-
-            var response = await client.IndexAsync(tweet, request => request.Index("tweets"));
-
-            if (response.IsValid)
-            {
-                Console.WriteLine($"Index document with ID {response.Id} succeeded.");
-            }
-
-            var responseT = await client.GetAsync<Tweet>(1, idx => idx.Index("tweets"));
-            var tweetT = responseT.Source;
-
-            var getResponse = await client.SearchAsync<Tweet>(s => s
-                .Index("tweets")
-                .From(0)
-                .Size(10)
-                //.Query(q => q
-                //    .Term(t => t.User, "stevejgordon")
-                //)
-            );
-
-            if (getResponse.IsValid)
-            {
-                var getTweet = getResponse.Documents.FirstOrDefault();
-            }
-
-            var updateResponse = await client.UpdateAsync<Tweet>(tweet.Id, u => u
-               .Index("tweets")
-               .Doc(new Tweet { Message = "Updated title!" }));
-
-            if (updateResponse.IsValid)
-            {
-                Console.WriteLine("Update document succeeded.");
-            }
-
-            var deleteResponse = await client.DeleteByQueryAsync<Tweet>(x => x.Index("tweets").Query(y => y.Term(z => z.Id, 1)));
-
-
-            if (deleteResponse.IsValid)
-            {
-                Console.WriteLine("Delete document succeeded.");
-            }
-
-            var tweets = new List<Tweet>()
-            {
-                new Tweet()
-                {
-                    Id = 7,
-                    User = "stevejgordon",
-                    PostDate = new DateTime(2009, 11, 15),
-                    Message = "Trying out the client, so far so good?"
-                },
-                new Tweet()
-                {
-                    Id = 8,
-                    User = "stevejgordon",
-                    PostDate = new DateTime(2009, 11, 15),
-                    Message = "Trying out the client, so far so good?"
-                },
-                new Tweet()
-                {
-                    Id = 9,
-                    User = "stevejgordon",
-                    PostDate = new DateTime(2009, 11, 15),
-                    Message = "Trying out the client, so far so good?"
-                },
-                new Tweet()
-                {
-                    Id = 10,
-                    User = "papapapa",
-                    PostDate = new DateTime(2009, 11, 15),
-                    Message = "Trying out the client, so far so good?"
-                },
-            };
-
-            var bulkInsertResponse = await client.BulkAsync(x => x.Index("tweets").CreateMany<Tweet>(tweets));
-
-            if(bulkInsertResponse.IsValid)
-            {
-                Console.WriteLine("Bulk insert succeeded");
-            }
-
-        }
-        
         #endregion
-
     }
 }
